@@ -1,0 +1,7 @@
+{
+  "name": "SmartFin 2",
+  "description": "A modern personal finance tracker with glassmorphism UI, AI insights, and goal calculation.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
