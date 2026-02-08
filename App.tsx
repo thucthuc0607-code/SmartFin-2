@@ -105,7 +105,6 @@ const getCategoryTheme = (cat: string) => {
 // ==========================================
 export const App: React.FC = () => {
   // --- UPDATED: LAZY INITIALIZATION FOR DARK MODE ---
-  // Priority: 1. LocalStorage -> 2. System Preference
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('smartfin_theme');
     if (saved) return saved === 'dark';
@@ -118,7 +117,7 @@ export const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>(MOCK_TRANSACTIONS);
   const [wallets, setWallets] = useState<Wallet[]>(INITIAL_WALLETS);
   const [budgetConfig, setBudgetConfig] = useState<{ limit: number }>({ limit: 5000000 });
-  const [isLoaded, setIsLoaded] = useState(false); // FLAG TO PREVENT OVERWRITING FIREBASE WITH DEFAULTS
+  const [isLoaded, setIsLoaded] = useState(false); 
 
   // MODAL STATES
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -126,21 +125,21 @@ export const App: React.FC = () => {
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   
   // Transaction Modal State
-  const [editingId, setEditingId] = useState<string | null>(null); // NEW: Track editing ID
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
   const [source, setSource] = useState<WalletType>('cash');
   const [note, setNote] = useState('');
   const [type, setType] = useState<'expense' | 'income'>('expense');
   
-  // --- NEW CALENDAR STATES ---
-  const [selectedDateStr, setSelectedDateStr] = useState(''); // YYYY-MM-DD
+  // --- CALENDAR STATES ---
+  const [selectedDateStr, setSelectedDateStr] = useState(''); 
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [calendarViewDate, setCalendarViewDate] = useState(new Date());
 
   const inputRef = useRef<HTMLInputElement>(null);
   
-  // NEW: Success State for Save Button
+  // Success State for Save Button
   const [isSuccess, setIsSuccess] = useState(false);
 
   // Local Modal Inputs
@@ -152,36 +151,30 @@ export const App: React.FC = () => {
 
   const currentCategories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
 
-  // --- 1. FIREBASE LOAD DATA (LISTENER) ---
+  // --- 1. FIREBASE LOAD DATA ---
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, "users", USER_ID), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        
-        // Convert Timestamps to JS Dates
         const txs = (data.transactions || []).map((t: any) => ({
           ...t,
           date: t.date?.toDate ? t.date.toDate() : new Date(t.date)
         }));
-
         setTransactions(txs);
         setWallets(data.wallets || INITIAL_WALLETS);
         setBudgetConfig(data.budgetConfig || { limit: 5000000 });
-        
-        // Sync Dark Mode from Cloud if available, otherwise keep local preference
         if (data.darkMode !== undefined) {
            setDarkMode(data.darkMode);
         }
       }
-      setIsLoaded(true); // MARK AS LOADED SO AUTO-SAVE CAN START
+      setIsLoaded(true);
     });
     return () => unsubscribe();
   }, []);
 
-  // --- 2. FIREBASE AUTO-SAVE (SYNC) ---
+  // --- 2. FIREBASE AUTO-SAVE ---
   useEffect(() => {
-    if (!isLoaded) return; // DON'T SAVE UNTIL INITIAL LOAD IS DONE
-
+    if (!isLoaded) return;
     const syncToFirebase = async () => {
       try {
         await setDoc(doc(db, "users", USER_ID), {
@@ -194,23 +187,20 @@ export const App: React.FC = () => {
         console.error("Firebase Sync Error:", error);
       }
     };
-
-    const timeoutId = setTimeout(syncToFirebase, 1500); // DEBOUNCE
+    const timeoutId = setTimeout(syncToFirebase, 1500);
     return () => clearTimeout(timeoutId);
   }, [transactions, wallets, budgetConfig, darkMode, isLoaded]);
 
-  // --- UPDATED: Handle Dark Mode CSS & Persistence ---
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('smartfin_theme', 'dark'); // Save immediately
+      localStorage.setItem('smartfin_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('smartfin_theme', 'light'); // Save immediately
+      localStorage.setItem('smartfin_theme', 'light');
     }
   }, [darkMode]);
 
-  // Auto-switch category if type changes (User manually clicks tab)
   useEffect(() => {
     if (!currentCategories.includes(category)) {
        setCategory(type === 'expense' ? EXPENSE_CATEGORIES[0] : INCOME_CATEGORIES[0]);
@@ -239,23 +229,15 @@ export const App: React.FC = () => {
     }
   }, [isBudgetModalOpen, budgetConfig]);
 
-  // --- CALENDAR LOGIC ---
   const calendarDays = useMemo(() => {
     const year = calendarViewDate.getFullYear();
     const month = calendarViewDate.getMonth();
-    
-    const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 is Sun
+    const firstDayOfMonth = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    // Adjust for Monday start (Mon=0, Sun=6)
     const padding = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
-    
     const days = [];
-    // Padding days
     for (let i = 0; i < padding; i++) days.push(null);
-    // Real days
     for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i));
-    
     return days;
   }, [calendarViewDate]);
 
@@ -272,7 +254,6 @@ export const App: React.FC = () => {
     setIsCalendarOpen(false);
   };
 
-  // --- HANDLERS ---
   const handleAddTransaction = (newTx: Omit<Transaction, 'id'>) => {
     const transaction: Transaction = { ...newTx, id: Math.random().toString(36).substr(2, 9) };
     setTransactions([transaction, ...transactions]);
@@ -286,7 +267,6 @@ export const App: React.FC = () => {
     setWallets(prev => prev.map(w => w.id === tx.source ? { ...w, balance: tx.type === 'expense' ? w.balance + tx.amount : w.balance - tx.amount } : w));
   };
 
-  // --- NEW: Edit Logic ---
   const handleEditTransaction = (t: Transaction) => {
     setEditingId(t.id);
     setAmount(t.amount.toString());
@@ -295,7 +275,7 @@ export const App: React.FC = () => {
     setNote(t.note);
     setType(t.type);
     setSelectedDateStr(getDateString(t.date));
-    setCalendarViewDate(t.date); // Jump calendar to that date
+    setCalendarViewDate(t.date);
     setIsModalOpen(true);
   };
 
@@ -328,7 +308,6 @@ export const App: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  // --- UPDATED VOICE HANDLER ---
   const handleVoiceSuccess = (data: { amount: number; category: string; note: string; type: 'expense' | 'income'; walletType: string }) => {
     setAmount(data.amount > 0 ? data.amount.toString() : '');
     setType(data.type);
@@ -354,14 +333,11 @@ export const App: React.FC = () => {
     const finalAmount = parseFloat(amount);
     if (!finalAmount || finalAmount === 0) return;
 
-    // Construct Date object from selectedDateStr + current time to avoid timezone shifts
     const now = new Date();
     const [y, m, d] = selectedDateStr.split('-').map(Number);
-    // Create date at noon to be safe or keep current time
     const txnDate = new Date(y, m - 1, d, now.getHours(), now.getMinutes());
 
     if (editingId) {
-      // --- UPDATE EXISTING TRANSACTION ---
       const oldTx = transactions.find(t => t.id === editingId);
       if (oldTx) {
         let revertWallets = wallets.map(w => {
@@ -373,7 +349,6 @@ export const App: React.FC = () => {
            }
            return w;
         });
-
         const updatedWallets = revertWallets.map(w => {
            if (w.id === source) {
               return { 
@@ -383,7 +358,6 @@ export const App: React.FC = () => {
            }
            return w;
         });
-
         setWallets(updatedWallets);
         setTransactions(prev => prev.map(t => t.id === editingId ? { ...t, amount: finalAmount, category, source, note, type, date: txnDate } : t));
       }
@@ -394,7 +368,6 @@ export const App: React.FC = () => {
 
     if (navigator.vibrate) navigator.vibrate(50);
     setIsSuccess(true);
-
     setTimeout(() => {
       setIsSuccess(false);
       setAmount('');
@@ -448,7 +421,7 @@ export const App: React.FC = () => {
       </div>
 
       <div className="relative z-10 max-w-md mx-auto min-h-screen flex flex-col">
-        {/* --- NEW TYPOGRAPHY HEADER (APPLE STYLE: WIDE TRACKING + INDIGO GRADIENT) --- */}
+        {/* --- APPLE-STYLE TYPOGRAPHY HEADER --- */}
         <header className="px-6 pt-8 pb-4 flex justify-between items-center relative z-20">
           <div className="flex items-center">
             <span className="text-3xl font-black tracking-wide text-slate-800 dark:text-white">Smart</span>
@@ -470,7 +443,7 @@ export const App: React.FC = () => {
               wallets={wallets} 
               transactions={transactions} 
               onDeleteTransaction={handleDeleteTransaction} 
-              onEditTransaction={handleEditTransaction} // NEW PROP
+              onEditTransaction={handleEditTransaction}
               budgetConfig={budgetConfig} 
               onViewAll={handleViewAll} 
               onViewIncome={handleViewIncome} 
@@ -485,7 +458,7 @@ export const App: React.FC = () => {
             <HistoryTab 
               transactions={transactions} 
               onDeleteTransaction={handleDeleteTransaction}
-              onEditTransaction={handleEditTransaction} // NEW PROP
+              onEditTransaction={handleEditTransaction}
               currentFilter={historyFilter} 
               onFilterChange={setHistoryFilter}
               budgetConfig={budgetConfig} 
@@ -585,19 +558,13 @@ export const App: React.FC = () => {
                     })}
                   </div>
                 </div>
-                
-                {/* 1. NOTE INPUT (MOVED UP) */}
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Ghi chú</label>
                   <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder={type === 'income' ? 'Ví dụ: Lương tháng 2' : 'Chi tiêu cho việc gì?'} className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-4 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all" />
-                  {/* REMOVED ALL SUGGESTIONS */}
                 </div>
-
-                {/* 2. CUSTOM CALENDAR (ONE UI GLASS) */}
                 <div>
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Thời gian</label>
                     <div className="relative">
-                      {/* Trigger Input */}
                       <button 
                         onClick={() => setIsCalendarOpen(!isCalendarOpen)}
                         className="w-full bg-slate-50 dark:bg-slate-800/50 backdrop-blur-md border border-slate-200 dark:border-white/10 rounded-2xl px-4 py-4 flex items-center justify-between text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -614,11 +581,8 @@ export const App: React.FC = () => {
                             <ChevronDown size={20} className="text-slate-400" />
                          </div>
                       </button>
-                      
-                      {/* Calendar Dropdown */}
                       {isCalendarOpen && (
                         <div className="mt-2 bg-white/80 dark:bg-slate-800/90 backdrop-blur-xl border border-white/20 dark:border-white/5 rounded-[24px] p-4 shadow-xl animate-slide-down overflow-hidden">
-                           {/* Header */}
                            <div className="flex items-center justify-between mb-4">
                               <button onClick={handlePrevMonth} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
                                  <ChevronLeft size={20} className="text-slate-600 dark:text-slate-300" />
@@ -630,22 +594,16 @@ export const App: React.FC = () => {
                                  <ChevronRight size={20} className="text-slate-600 dark:text-slate-300" />
                               </button>
                            </div>
-
-                           {/* Weekdays */}
                            <div className="grid grid-cols-7 mb-2 text-center">
                               {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(d => (
                                 <div key={d} className="text-[10px] font-bold text-slate-400 uppercase">{d}</div>
                               ))}
                            </div>
-
-                           {/* Days Grid */}
                            <div className="grid grid-cols-7 gap-1">
                               {calendarDays.map((date, idx) => {
-                                 if (!date) return <div key={idx} className="h-10" />; // Empty slot
-                                 
+                                 if (!date) return <div key={idx} className="h-10" />;
                                  const isSelected = getDateString(date) === selectedDateStr;
                                  const isToday = getDateString(date) === getDateString(new Date());
-
                                  return (
                                    <button 
                                       key={idx}
@@ -673,7 +631,7 @@ export const App: React.FC = () => {
             <div className="absolute bottom-6 left-4 right-4 z-50">
               <button 
                 onClick={(e) => handleSubmit(e)} 
-                disabled={!amount || parseFloat(amount) === 0 || isSuccess} // Disable while showing success
+                disabled={!amount || parseFloat(amount) === 0 || isSuccess}
                 className={`
                   w-full h-14 rounded-2xl font-bold text-lg text-white shadow-xl transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer z-50 
                   disabled:opacity-50 disabled:cursor-not-allowed
@@ -684,10 +642,7 @@ export const App: React.FC = () => {
                 `}
               >
                 {isSuccess ? (
-                  <>
-                    <Check size={24} className="animate-bounce" />
-                    <span>Đã lưu</span>
-                  </>
+                  <><Check size={24} className="animate-bounce" /><span>Đã lưu</span></>
                 ) : (
                   editingId ? 'Cập Nhật Giao Dịch' : (type === 'expense' ? 'Lưu Chi Tiêu' : 'Lưu Thu Nhập')
                 )}
@@ -696,7 +651,6 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* BALANCE MODAL */}
       {isBalanceModalOpen && (
         <div className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] shadow-2xl p-6 border border-white/20 dark:border-white/10">
@@ -723,7 +677,6 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* BUDGET MODAL */}
       {isBudgetModalOpen && (
         <div className="fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
            <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] shadow-2xl p-6 border border-white/20 dark:border-white/10">
@@ -758,10 +711,7 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* FAB */}
       <button type="button" onClick={() => handleOpenModal()} className="fixed bottom-24 right-4 w-14 h-14 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full shadow-2xl flex items-center justify-center z-[80] active:scale-90 transition-transform cursor-pointer"><Plus size={24} /></button>
-
-      {/* Voice Input Ref */}
       <VoiceInput ref={voiceInputRef} onSuccess={handleVoiceSuccess} onError={handleVoiceError} />
 
       <style>{`
@@ -773,16 +723,9 @@ export const App: React.FC = () => {
         @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .animate-slide-down { animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; transform-origin: top center; }
         @keyframes slideDown { from { transform: scaleY(0.95); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
-        @keyframes textShine {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        .animate-text-shine {
-            background-size: 200% auto;
-            animation: textShine 3s linear infinite;
-        }
       `}</style>
+      </div>
     </div>
   );
 }
+export default App;
