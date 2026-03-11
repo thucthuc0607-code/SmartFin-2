@@ -10,11 +10,7 @@ import {
   Mic, Check
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, doc, setDoc, onSnapshot, collection, 
-  query, where, orderBy, addDoc, updateDoc, deleteDoc, Timestamp 
-} from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { Transaction, Wallet, WalletType } from './types';
 import { INITIAL_WALLETS, MOCK_TRANSACTIONS, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from './constants';
 import HomeTab from './components/HomeTab';
@@ -35,7 +31,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const auth = getAuth(app);
+const USER_ID = "user_default";
 
 // --- HELPERS ---
 const formatCurrency = (amount: number, short = false) => {
@@ -108,9 +104,6 @@ const getCategoryTheme = (cat: string) => {
 // 4. MAIN APP COMPONENT
 // ==========================================
 export const App: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
   // --- UPDATED: LAZY INITIALIZATION FOR DARK MODE ---
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('smartfin_theme');
@@ -121,95 +114,10 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'history' | 'analytics'>('home');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'expense' | 'income'>('all');
 
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>(MOCK_TRANSACTIONS);
   const [wallets, setWallets] = useState<Wallet[]>(INITIAL_WALLETS);
   const [budgetConfig, setBudgetConfig] = useState<{ limit: number }>({ limit: 5000000 });
   const [isLoaded, setIsLoaded] = useState(false); 
-
-  // --- 1. AUTHENTICATION ---
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      if (u) {
-        setUser(u);
-        setAuthLoading(false);
-      } else {
-        signInAnonymously(auth).catch(err => console.error("Auth Error:", err));
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // --- 2. FIREBASE LOAD DATA ---
-  useEffect(() => {
-    if (!user) return;
-
-    // Listen to user settings (wallets, budget, darkMode)
-    const unsubSettings = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setWallets(data.wallets || INITIAL_WALLETS);
-        setBudgetConfig(data.budgetConfig || { limit: 5000000 });
-        if (data.darkMode !== undefined) {
-           setDarkMode(data.darkMode);
-        }
-      } else {
-        // Initialize user document if it doesn't exist
-        setDoc(doc(db, "users", user.uid), {
-          wallets: INITIAL_WALLETS,
-          budgetConfig: { limit: 5000000 },
-          darkMode: darkMode,
-          userId: user.uid
-        });
-      }
-      setIsLoaded(true);
-    });
-
-    // Listen to transactions collection
-    const q = query(
-      collection(db, "transactions"), 
-      where("userId", "==", user.uid),
-      orderBy("date", "desc")
-    );
-    
-    const unsubTransactions = onSnapshot(q, (querySnapshot) => {
-      const txs: Transaction[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        txs.push({
-          ...data,
-          id: doc.id,
-          date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date)
-        } as Transaction);
-      });
-      setTransactions(txs);
-    }, (error) => {
-      console.error("Transactions Listener Error:", error);
-    });
-
-    return () => {
-      unsubSettings();
-      unsubTransactions();
-    };
-  }, [user]);
-
-  useEffect(() => {
-    // 1. Update DOM and localStorage (Independent of user)
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('smartfin_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('smartfin_theme', 'light');
-    }
-
-    // 2. Sync to Firebase if user is logged in
-    if (user) {
-      setDoc(doc(db, "users", user.uid), { darkMode }, { merge: true })
-        .catch(err => console.error("Error syncing darkMode:", err));
-    }
-  }, [darkMode, user]);
-
-  // Remove the old syncToFirebase useEffect as we now update Firestore directly
 
   // MODAL STATES
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -242,6 +150,56 @@ export const App: React.FC = () => {
   const voiceInputRef = useRef<VoiceInputHandle>(null);
 
   const currentCategories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+
+  // --- 1. FIREBASE LOAD DATA ---
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, "users", USER_ID), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const txs = (data.transactions || []).map((t: any) => ({
+          ...t,
+          date: t.date?.toDate ? t.date.toDate() : new Date(t.date)
+        }));
+        setTransactions(txs);
+        setWallets(data.wallets || INITIAL_WALLETS);
+        setBudgetConfig(data.budgetConfig || { limit: 5000000 });
+        if (data.darkMode !== undefined) {
+           setDarkMode(data.darkMode);
+        }
+      }
+      setIsLoaded(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- 2. FIREBASE AUTO-SAVE ---
+  useEffect(() => {
+    if (!isLoaded) return;
+    const syncToFirebase = async () => {
+      try {
+        await setDoc(doc(db, "users", USER_ID), {
+          transactions,
+          wallets,
+          budgetConfig,
+          darkMode
+        }, { merge: true });
+      } catch (error) {
+        console.error("Firebase Sync Error:", error);
+      }
+    };
+    const timeoutId = setTimeout(syncToFirebase, 1500);
+    return () => clearTimeout(timeoutId);
+  }, [transactions, wallets, budgetConfig, darkMode, isLoaded]);
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('smartfin_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('smartfin_theme', 'light');
+    }
+  }, [darkMode]);
 
   useEffect(() => {
     if (!currentCategories.includes(category)) {
@@ -296,43 +254,17 @@ export const App: React.FC = () => {
     setIsCalendarOpen(false);
   };
 
-  const handleAddTransaction = async (newTx: Omit<Transaction, 'id'>) => {
-    if (!user) return;
-    try {
-      await addDoc(collection(db, "transactions"), {
-        ...newTx,
-        userId: user.uid,
-        date: Timestamp.fromDate(newTx.date)
-      });
-      
-      const updatedWallets = wallets.map(w => 
-        w.id === newTx.source 
-          ? { ...w, balance: newTx.type === 'expense' ? w.balance - newTx.amount : w.balance + newTx.amount } 
-          : w
-      );
-      await setDoc(doc(db, "users", user.uid), { wallets: updatedWallets }, { merge: true });
-    } catch (error) {
-      console.error("Error adding transaction:", error);
-    }
+  const handleAddTransaction = (newTx: Omit<Transaction, 'id'>) => {
+    const transaction: Transaction = { ...newTx, id: Math.random().toString(36).substr(2, 9) };
+    setTransactions([transaction, ...transactions]);
+    setWallets(prev => prev.map(w => w.id === newTx.source ? { ...w, balance: newTx.type === 'expense' ? w.balance - newTx.amount : w.balance + newTx.amount } : w));
   };
 
-  const handleDeleteTransaction = async (id: string) => {
-    if (!user) return;
+  const handleDeleteTransaction = (id: string) => {
     const tx = transactions.find(t => t.id === id);
     if (!tx) return;
-    
-    try {
-      await deleteDoc(doc(db, "transactions", id));
-      
-      const updatedWallets = wallets.map(w => 
-        w.id === tx.source 
-          ? { ...w, balance: tx.type === 'expense' ? w.balance + tx.amount : w.balance - tx.amount } 
-          : w
-      );
-      await setDoc(doc(db, "users", user.uid), { wallets: updatedWallets }, { merge: true });
-    } catch (error) {
-      console.error("Error deleting transaction:", error);
-    }
+    setTransactions(transactions.filter(t => t.id !== id));
+    setWallets(prev => prev.map(w => w.id === tx.source ? { ...w, balance: tx.type === 'expense' ? w.balance + tx.amount : w.balance - tx.amount } : w));
   };
 
   const handleEditTransaction = (t: Transaction) => {
@@ -347,36 +279,23 @@ export const App: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleUpdateBalances = async () => {
-    if (!user) return;
+  const handleUpdateBalances = () => {
     const newCash = parseFloat(tempBalances.cash.replace(/\D/g, '')) || 0;
     const newBank = parseFloat(tempBalances.bank.replace(/\D/g, '')) || 0;
     const newEwallet = parseFloat(tempBalances.ewallet.replace(/\D/g, '')) || 0;
-    
-    const updatedWallets = wallets.map(w => {
+    setWallets(prev => prev.map(w => {
       if (w.id === 'cash') return { ...w, balance: newCash };
       if (w.id === 'bank') return { ...w, balance: newBank };
       if (w.id === 'ewallet') return { ...w, balance: newEwallet };
       return w;
-    });
-
-    try {
-      await setDoc(doc(db, "users", user.uid), { wallets: updatedWallets }, { merge: true });
-      setIsBalanceModalOpen(false);
-    } catch (error) {
-      console.error("Error updating balances:", error);
-    }
+    }));
+    setIsBalanceModalOpen(false);
   };
 
-  const handleUpdateBudget = async () => {
-    if (!user) return;
+  const handleUpdateBudget = () => {
     const limit = parseFloat(tempBudgetInput.replace(/\D/g, '')) || 0;
-    try {
-      await setDoc(doc(db, "users", user.uid), { budgetConfig: { limit } }, { merge: true });
-      setIsBudgetModalOpen(false);
-    } catch (error) {
-      console.error("Error updating budget:", error);
-    }
+    setBudgetConfig({ limit });
+    setIsBudgetModalOpen(false);
   };
 
   const handleOpenModal = () => {
@@ -409,9 +328,8 @@ export const App: React.FC = () => {
     alert(message);
   };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!user) return;
     const finalAmount = parseFloat(amount);
     if (!finalAmount || finalAmount === 0) return;
 
@@ -419,55 +337,43 @@ export const App: React.FC = () => {
     const [y, m, d] = selectedDateStr.split('-').map(Number);
     const txnDate = new Date(y, m - 1, d, now.getHours(), now.getMinutes());
 
-    try {
-      if (editingId) {
-        const oldTx = transactions.find(t => t.id === editingId);
-        if (oldTx) {
-          let revertWallets = wallets.map(w => {
-             if (w.id === oldTx.source) {
-                return { 
-                  ...w, 
-                  balance: oldTx.type === 'expense' ? w.balance + oldTx.amount : w.balance - oldTx.amount 
-                };
-             }
-             return w;
-          });
-          const updatedWallets = revertWallets.map(w => {
-             if (w.id === source) {
-                return { 
-                   ...w, 
-                   balance: type === 'expense' ? w.balance - finalAmount : w.balance + finalAmount 
-                };
-             }
-             return w;
-          });
-          
-          await updateDoc(doc(db, "transactions", editingId), {
-            amount: finalAmount, 
-            category, 
-            source, 
-            note, 
-            type, 
-            date: Timestamp.fromDate(txnDate)
-          });
-          await setDoc(doc(db, "users", user.uid), { wallets: updatedWallets }, { merge: true });
-        }
-        setEditingId(null);
-      } else {
-        await handleAddTransaction({ amount: finalAmount, category, source, note, type, date: txnDate });
+    if (editingId) {
+      const oldTx = transactions.find(t => t.id === editingId);
+      if (oldTx) {
+        let revertWallets = wallets.map(w => {
+           if (w.id === oldTx.source) {
+              return { 
+                ...w, 
+                balance: oldTx.type === 'expense' ? w.balance + oldTx.amount : w.balance - oldTx.amount 
+              };
+           }
+           return w;
+        });
+        const updatedWallets = revertWallets.map(w => {
+           if (w.id === source) {
+              return { 
+                 ...w, 
+                 balance: type === 'expense' ? w.balance - finalAmount : w.balance + finalAmount 
+              };
+           }
+           return w;
+        });
+        setWallets(updatedWallets);
+        setTransactions(prev => prev.map(t => t.id === editingId ? { ...t, amount: finalAmount, category, source, note, type, date: txnDate } : t));
       }
-
-      if (navigator.vibrate) navigator.vibrate(50);
-      setIsSuccess(true);
-      setTimeout(() => {
-        setIsSuccess(false);
-        setAmount('');
-        setNote('');
-        setIsModalOpen(false);
-      }, 500);
-    } catch (error) {
-      console.error("Error submitting transaction:", error);
+      setEditingId(null);
+    } else {
+      handleAddTransaction({ amount: finalAmount, category, source, note, type, date: txnDate });
     }
+
+    if (navigator.vibrate) navigator.vibrate(50);
+    setIsSuccess(true);
+    setTimeout(() => {
+      setIsSuccess(false);
+      setAmount('');
+      setNote('');
+      setIsModalOpen(false);
+    }, 500);
   };
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -505,17 +411,8 @@ export const App: React.FC = () => {
   const handleViewIncome = () => { setHistoryFilter('income'); setActiveTab('history'); };
   const handleViewExpense = () => { setHistoryFilter('expense'); setActiveTab('history'); };
 
-  if (authLoading || !isLoaded) {
-    return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mb-4"></div>
-        <p className="text-slate-600 dark:text-slate-400 font-medium">Đang tải dữ liệu...</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors duration-300 font-sans selection:bg-blue-500/30">
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-900 transition-colors duration-300 font-sans selection:bg-blue-500/30">
       {/* BACKGROUND BLOBS */}
       <div className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
         <div className="absolute -top-[20%] -left-[10%] w-[70%] h-[70%] bg-blue-400/20 dark:bg-blue-600/10 rounded-full blur-3xl animate-blob"></div>
@@ -586,7 +483,7 @@ export const App: React.FC = () => {
 
         {/* MODALS */}
         {isModalOpen && (
-        <div className="fixed inset-0 z-[9999] bg-slate-50 dark:bg-slate-900 flex flex-col animate-slide-up">
+        <div className="fixed inset-0 z-[9999] bg-slate-100 dark:bg-slate-900 flex flex-col animate-slide-up">
             <div className="flex justify-between items-center p-6 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 shadow-sm">
               <h3 className="text-xl font-bold text-slate-800 dark:text-white">{editingId ? 'Chỉnh sửa giao dịch' : 'Giao dịch mới'}</h3>
               <button onClick={() => setIsModalOpen(false)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full hover:bg-slate-200 transition-colors cursor-pointer">
@@ -775,7 +672,7 @@ export const App: React.FC = () => {
                 <input type="text" inputMode="numeric" value={formatInputDisplay(tempBalances.ewallet)} onChange={(e) => handleBalanceInputChange('ewallet', e.target.value)} className="w-full bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 rounded-2xl px-4 py-3 text-lg font-bold text-pink-800 dark:text-pink-300 focus:outline-none" />
               </div>
             </div>
-            <button onClick={handleUpdateBalances} className="w-full h-12 bg-blue-600 dark:bg-white text-white dark:text-slate-900 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg"><Save size={18} /> Lưu thay đổi</button>
+            <button onClick={handleUpdateBalances} className="w-full h-12 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg"><Save size={18} /> Lưu thay đổi</button>
           </div>
         </div>
       )}
@@ -814,7 +711,7 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <button type="button" onClick={() => handleOpenModal()} className="fixed bottom-24 right-4 w-14 h-14 bg-blue-600 dark:bg-white text-white dark:text-slate-900 rounded-full shadow-2xl flex items-center justify-center z-[80] active:scale-90 transition-transform cursor-pointer"><Plus size={24} /></button>
+      <button type="button" onClick={() => handleOpenModal()} className="fixed bottom-24 right-4 w-14 h-14 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full shadow-2xl flex items-center justify-center z-[80] active:scale-90 transition-transform cursor-pointer"><Plus size={24} /></button>
       <VoiceInput ref={voiceInputRef} onSuccess={handleVoiceSuccess} onError={handleVoiceError} />
 
       <style>{`
