@@ -153,7 +153,7 @@ export const App: React.FC = () => {
 
   // --- 1. FIREBASE LOAD DATA ---
   useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, "users", USER_ID), (docSnap) => {
+    const unsubscribe = onSnapshot(doc(db, "users_demo", USER_ID), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const txs = (data.transactions || []).map((t: any) => ({
@@ -177,7 +177,7 @@ export const App: React.FC = () => {
     if (!isLoaded) return;
     const syncToFirebase = async () => {
       try {
-        await setDoc(doc(db, "users", USER_ID), {
+        await setDoc(doc(db, "users_demo", USER_ID), {
           transactions,
           wallets,
           budgetConfig,
